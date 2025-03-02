@@ -17,7 +17,7 @@ if sys.platform == 'win32':
     SW_SHOW = 5
     SW_SHOWNORMAL = 1
     
-    # Function to force window activation using Windows API
+    # Function to force window focus using Windows API
     def force_window_focus(hwnd):
         """Force window focus using Windows API"""
         user32 = ctypes.WinDLL('user32')
@@ -63,6 +63,7 @@ class QuickDefinitionApp:
         self.suggestion_popup = None
         self.suggestion_after_id = None  # ID for debouncing suggestions
         self.active_fetch_thread = None
+        self.selected_suggestion_index = -1  # For keyboard navigation
         
         # Create modern spinner frames
         self.spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -246,9 +247,14 @@ class QuickDefinitionApp:
         # Event bindings with focus fixes
         self.entry.bind("<FocusIn>", self.on_entry_focus_in)
         self.entry.bind("<FocusOut>", self.on_entry_focus_out)
-        self.entry.bind('<Return>', self.fetch_definition)
+        self.entry.bind('<Return>', self.on_return)
         self.entry.bind('<Escape>', lambda e: self.hide_input_window())
         self.entry.bind("<KeyRelease>", self.on_key_release)
+        
+        # Add arrow key navigation for suggestions
+        self.entry.bind("<Down>", self.navigate_suggestions_down)
+        self.entry.bind("<Up>", self.navigate_suggestions_up)
+        self.entry.bind("<Tab>", self.select_current_suggestion)
         
         self.input_window.bind('<Escape>', lambda e: self.hide_input_window())
         
@@ -281,9 +287,28 @@ class QuickDefinitionApp:
         if not self.entry.get():
             self.entry.insert(0, "Type a word to define...")
             self.entry.config(fg=self.colors['muted'])
-        # Hide suggestions when focus is lost
+        
+        # Set a small delay before hiding suggestions
+        # to allow clicking on them to work properly
         if self.suggestion_popup:
-            self.suggestion_popup.destroy()
+            self.root.after(100, self.check_focus_for_suggestions)
+
+    def on_return(self, event):
+        """Return key behavior: select suggestion if shown, otherwise fetch definition."""
+        if self.suggestion_popup:
+            return self.select_current_suggestion(event)
+        else:
+            return self.fetch_definition(event)
+
+    def check_focus_for_suggestions(self):
+        """Check if we should close the suggestions popup based on focus"""
+        # If focus is not on suggestion popup or its children, close it
+        try:
+            if self.suggestion_popup and self.suggestion_popup.focus_get() is None:
+                self.suggestion_popup.destroy()
+                self.suggestion_popup = None
+        except:
+            # If there's an error (e.g., window was destroyed), make sure to clean up
             self.suggestion_popup = None
 
     def center_window(self, window, width, height):
@@ -401,14 +426,17 @@ class QuickDefinitionApp:
         self.input_window.withdraw()
         
         if self.suggestion_popup:
-            self.suggestion_popup.destroy()
-            self.suggestion_popup = None
+            try:
+                self.suggestion_popup.destroy()
+                self.suggestion_popup = None
+            except tk.TclError:
+                pass
 
     def on_key_release(self, event):
         """Handle key release events for suggestions"""
         # Filter out non-character keys to avoid unnecessary suggestion lookups
         if event.keysym in ('Shift_L', 'Shift_R', 'Control_L', 'Control_R', 
-                           'Alt_L', 'Alt_R', 'Escape', 'Return'):
+                           'Alt_L', 'Alt_R', 'Escape', 'Return', 'Up', 'Down', 'Tab'):
             return
             
         # Debounce: cancel any pending suggestion query
@@ -424,12 +452,71 @@ class QuickDefinitionApp:
                 self.suggestion_popup.destroy()
                 self.suggestion_popup = None
 
+    def navigate_suggestions_down(self, event):
+        """Navigate down through suggestions with Down arrow key"""
+        if self.suggestion_popup:
+            if hasattr(self, 'suggestion_items') and self.suggestion_items:
+                self.selected_suggestion_index = min(
+                    self.selected_suggestion_index + 1,
+                    len(self.suggestion_items) - 1
+                )
+                self.highlight_selected_suggestion()
+            return "break"  # Prevent default behavior
+        return None
+
+    def navigate_suggestions_up(self, event):
+        """Navigate up through suggestions with Up arrow key"""
+        if self.suggestion_popup:
+            if hasattr(self, 'suggestion_items') and self.suggestion_items:
+                self.selected_suggestion_index = max(
+                    self.selected_suggestion_index - 1,
+                    -1  # -1 means no selection
+                )
+                self.highlight_selected_suggestion()
+            return "break"  # Prevent default behavior
+        return None
+
+    def highlight_selected_suggestion(self):
+        """Highlight the currently selected suggestion"""
+        if not hasattr(self, 'suggestion_items') or not self.suggestion_items:
+            return
+            
+        # Reset all items to normal
+        for i, (frame, label) in enumerate(self.suggestion_items):
+            if i == self.selected_suggestion_index:
+                # Highlight the selected item
+                frame.configure(bg=self.colors['primary'])
+                label.configure(bg=self.colors['primary'])
+            else:
+                # Reset to normal
+                frame.configure(bg=self.colors['background'])
+                label.configure(bg=self.colors['background'])
+
+    def select_current_suggestion(self, event=None):
+        """Select the currently highlighted suggestion"""
+        if self.suggestion_popup and self.selected_suggestion_index >= 0:
+            try:
+                word = self.suggestion_items[self.selected_suggestion_index][1]['text']
+                self.entry.delete(0, tk.END)
+                self.entry.insert(0, word)
+                self.entry.configure(fg=self.colors['text'])
+                self.suggestion_popup.destroy()
+                self.suggestion_popup = None
+                self.selected_suggestion_index = -1
+                return "break"  # Prevent default behavior
+            except (IndexError, KeyError, tk.TclError):
+                pass
+        return None
+
     def show_suggestions(self):
         """Show word suggestions based on typing"""
         # Destroy old popup if it exists
         if self.suggestion_popup:
-            self.suggestion_popup.destroy()
-            self.suggestion_popup = None
+            try:
+                self.suggestion_popup.destroy()
+                self.suggestion_popup = None
+            except tk.TclError:
+                pass
 
         word_fragment = self.entry.get().strip()
         if len(word_fragment) < 2 or word_fragment == "Type a word to define...":
@@ -453,6 +540,10 @@ class QuickDefinitionApp:
 
         if not suggestions:
             return
+
+        # Reset selection index
+        self.selected_suggestion_index = -1
+        self.suggestion_items = []
 
         # Create a popup that looks like a dropdown
         self.suggestion_popup = tk.Toplevel(self.input_window)
@@ -500,14 +591,18 @@ class QuickDefinitionApp:
                             anchor='w')
             label.pack(fill='both')
             
+            # Store reference to suggestion items for navigation
+            self.suggestion_items.append((item_frame, label))
+            
             # Hover effects
             def on_enter(e, frame=item_frame, lbl=label):
                 frame.configure(bg=self.colors['primary'])
                 lbl.configure(bg=self.colors['primary'])
             
             def on_leave(e, frame=item_frame, lbl=label):
-                frame.configure(bg=self.colors['background'])
-                lbl.configure(bg=self.colors['background'])
+                if frame != self.suggestion_items[self.selected_suggestion_index][0]:
+                    frame.configure(bg=self.colors['background'])
+                    lbl.configure(bg=self.colors['background'])
             
             def on_click(e, word=suggestion):
                 self.entry.delete(0, tk.END)
@@ -516,6 +611,7 @@ class QuickDefinitionApp:
                 if self.suggestion_popup:
                     self.suggestion_popup.destroy()
                     self.suggestion_popup = None
+                self.entry.focus_set()
             
             item_frame.bind('<Enter>', on_enter)
             item_frame.bind('<Leave>', on_leave)
@@ -543,11 +639,17 @@ class QuickDefinitionApp:
         
         # Remove mousewheel binding when popup is destroyed
         def on_destroy(e):
-            canvas.unbind_all("<MouseWheel>")
-            canvas.unbind_all("<Button-4>")
-            canvas.unbind_all("<Button-5>")
+            try:
+                canvas.unbind_all("<MouseWheel>")
+                canvas.unbind_all("<Button-4>")
+                canvas.unbind_all("<Button-5>")
+            except:
+                pass
             
         self.suggestion_popup.bind("<Destroy>", on_destroy)
+        
+        # Let the popup handle escape to close itself
+        self.suggestion_popup.bind('<Escape>', lambda e: self.suggestion_popup.destroy())
 
     def fetch_definition(self, event):
         """Start the definition fetching process"""
@@ -555,8 +657,23 @@ class QuickDefinitionApp:
         if word == "Type a word to define..." or not word:
             return
             
+        # Properly close all windows
         self.hide_input_window()
         
+        # If a suggestion is currently selected, use that word
+        if self.suggestion_popup and self.selected_suggestion_index >= 0:
+            try:
+                word = self.suggestion_items[self.selected_suggestion_index][1]['text']
+            except (IndexError, KeyError, tk.TclError):
+                pass
+            
+            # Make sure to close the popup
+            try:
+                self.suggestion_popup.destroy()
+                self.suggestion_popup = None
+            except tk.TclError:
+                pass
+            
         # Prevent multiple fetches
         if self.active_fetch_thread and self.active_fetch_thread.is_alive():
             return
@@ -605,6 +722,10 @@ class QuickDefinitionApp:
         
         # Center and size the window
         self.center_window(self.loading_window, 250, 110)
+        
+        # Make sure this window has focus
+        self.loading_window.focus_force()
+        self.loading_window.grab_set()
 
     def animate_spinner(self):
         """Animate the loading spinner"""
