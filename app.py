@@ -294,8 +294,8 @@ class QuickDefinitionApp:
             self.root.after(100, self.check_focus_for_suggestions)
 
     def on_return(self, event):
-        """Return key behavior: select suggestion if shown, otherwise fetch definition."""
-        if self.suggestion_popup:
+        """Return key behavior: select suggestion if shown and a suggestion is selected, otherwise fetch definition."""
+        if self.suggestion_popup and self.selected_suggestion_index >= 0:
             return self.select_current_suggestion(event)
         else:
             return self.fetch_definition(event)
