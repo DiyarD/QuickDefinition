@@ -941,8 +941,21 @@ class QuickDefinitionApp:
                 divider = tk.Frame(scrollable_frame, height=1, bg=self.colors['border'])
                 divider.pack(fill='x', pady=(0, 12))
                 
-                # Definition list - using a simpler layout approach
-                for i, defn in enumerate(meaning.get('definitions', []), 1):
+                # Group definitions by their text to avoid duplication; accumulate examples per definition
+                definitions = meaning.get('definitions', [])
+                grouped_defs = {}
+                for defn in definitions:
+                    def_text = defn.get('definition', '')
+                    example = defn.get('example')
+                    if def_text in grouped_defs:
+                        if example and example not in grouped_defs[def_text]:
+                            grouped_defs[def_text].append(example)
+                    else:
+                        grouped_defs[def_text] = []
+                        if example:
+                            grouped_defs[def_text].append(example)
+                i = 1
+                for def_text, examples in grouped_defs.items():
                     # Use a Grid layout inside a frame for better control
                     item_frame = tk.Frame(scrollable_frame, bg=self.colors['background'])
                     item_frame.pack(fill='x', pady=(0, 12), padx=(8, 0))
@@ -956,19 +969,22 @@ class QuickDefinitionApp:
                     num_label.grid(row=0, column=0, sticky='ne', padx=(0, 10))
                     
                     # Definition text in second column
-                    def_label = tk.Label(item_frame, text=defn.get('definition', ''),
+                    def_label = tk.Label(item_frame, text=def_text,
                                         font=self.fonts['body'],
                                         bg=self.colors['background'], fg=self.colors['text'],
                                         wraplength=420, justify='left', anchor='w')
                     def_label.grid(row=0, column=1, sticky='w')
                     
-                    # Example in third row if available
-                    if defn.get('example'):
-                        ex_label = tk.Label(item_frame, text=f'"{defn["example"]}"',
+                    # Display each example below the definition text if available
+                    current_row = 1
+                    for ex in examples:
+                        ex_label = tk.Label(item_frame, text=f'"{ex}"',
                                         font=(self.fonts['body'][0], self.fonts['body'][1], 'italic'),
                                         bg=self.colors['background'], fg=self.colors['muted'],
                                         wraplength=400, justify='left', anchor='w')
-                        ex_label.grid(row=1, column=1, sticky='w', pady=(4, 0))
+                        ex_label.grid(row=current_row, column=1, sticky='w', pady=(4, 0))
+                        current_row += 1
+                    i += 1
             
             # Navigation/control buttons at the bottom
             control_frame = tk.Frame(main_frame, bg=self.colors['background'])
