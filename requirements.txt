@@ -1,0 +1,5 @@
+tkinter
+pynput>=1.7.6
+requests>=2.27.1
+nltk>=3.7
+python-xlib; platform_system=="Linux"
