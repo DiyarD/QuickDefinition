@@ -141,9 +141,9 @@ class QuickDefinitionApp:
         system = platform.system()
         
         if system == 'Darwin':  # macOS often uses Command instead of Ctrl
-            hotkey_combo = '<cmd>+<alt>+<space>'
+            hotkey_combo = '<cmd>+<alt>+d'
         else:  # Windows, Linux, etc.
-            hotkey_combo = '<ctrl>+<alt>+<space>'
+            hotkey_combo = '<ctrl>+<alt>+d'
         
         # Start listening for the appropriate hotkey
         self.hotkey = keyboard.GlobalHotKeys({
@@ -259,9 +259,9 @@ class QuickDefinitionApp:
         self.input_window.bind('<Escape>', lambda e: self.hide_input_window())
         
         # Get platform-specific shortcut name
-        shortcut_text = "Ctrl+Alt+Space"
+        shortcut_text = "Ctrl+Alt+D"
         if platform.system() == 'Darwin':  # macOS 
-            shortcut_text = "Cmd+Alt+Space"
+            shortcut_text = "Cmd+Alt+D"
         
         # Keyboard shortcut hint
         shortcut_frame = tk.Frame(content_frame, bg=self.colors['background'])
@@ -510,101 +510,98 @@ class QuickDefinitionApp:
 
     def show_suggestions(self):
         """Show word suggestions based on typing"""
-        # Destroy old popup if it exists
-        if self.suggestion_popup:
-            try:
-                self.suggestion_popup.destroy()
-                self.suggestion_popup = None
-            except tk.TclError:
-                pass
-
         word_fragment = self.entry.get().strip()
         if len(word_fragment) < 2 or word_fragment == "Type a word to define...":
+            if self.suggestion_popup:
+                try:
+                    self.suggestion_popup.destroy()
+                except tk.TclError:
+                    pass
+                self.suggestion_popup = None
+            self.last_suggestions = []
             return
-
         # Check if database exists
         if not os.path.exists(self.get_database_path()):
             return  # No suggestions without database
-
         try:
             conn = sqlite3.connect(self.get_database_path())
             c = conn.cursor()
             # Use a LIKE query for words starting with the fragment (case-insensitive)
             c.execute("SELECT DISTINCT lemma FROM definitions WHERE lemma LIKE ? COLLATE NOCASE LIMIT 8", 
-                     (word_fragment + '%',))
+                    (word_fragment + '%',))
             suggestions = [row[0] for row in c.fetchall()]
             conn.close()
-        except Exception as e:
-            print("Error fetching suggestions:", e)
+        except Exception as ex:
+            print("Error fetching suggestions:", ex)
             suggestions = []
-
         if not suggestions:
+            if self.suggestion_popup:
+                try:
+                    self.suggestion_popup.destroy()
+                except tk.TclError:
+                    pass
+                self.suggestion_popup = None
+            self.last_suggestions = []
             return
-
+        # If suggestions haven't changed and popup exists, do not re-render
+        if hasattr(self, 'last_suggestions') and self.last_suggestions == suggestions and self.suggestion_popup:
+            return
+        self.last_suggestions = suggestions
+        # If suggestion popup exists, update its contents; otherwise, create it.
+        if self.suggestion_popup:
+            # Update existing suggestions container
+            for child in self.suggestion_container.winfo_children():
+                child.destroy()
+            self.suggestion_items = []
+        else:
+            # Create a popup that looks like a dropdown
+            self.suggestion_popup = tk.Toplevel(self.input_window)
+            self.suggestion_popup.overrideredirect(True)
+            self.suggestion_popup.configure(bg=self.colors['border'])
+            self.suggestion_popup.attributes('-topmost', True)
+            # Calculate popup position below the entry field
+            x = self.input_window.winfo_x() + 16
+            y = self.input_window.winfo_y() + 95  # Position below entry
+            width = self.input_window.winfo_width() - 32
+            
+            # Calculate the height based on number of suggestions (36px per item plus padding)
+            popup_height = len(suggestions) * 36 + 8
+            
+            self.suggestion_popup.geometry(f"{width}x{popup_height}+{x}+{y}")
+            # Inner frame with padding
+            inner_frame = tk.Frame(self.suggestion_popup, bg=self.colors['background'], padx=1, pady=1)
+            inner_frame.pack(fill='both', expand=True)
+            
+            # Create a simple frame to hold suggestions instead of a scrollable canvas
+            self.suggestion_container = tk.Frame(inner_frame, bg=self.colors['background'])
+            self.suggestion_container.pack(fill='both', expand=True)
+            
+            # Let the popup handle escape to close itself
+            self.suggestion_popup.bind('<Escape>', lambda event: self.suggestion_popup.destroy())
+        
         # Reset selection index
         self.selected_suggestion_index = -1
         self.suggestion_items = []
-
-        # Create a popup that looks like a dropdown
-        self.suggestion_popup = tk.Toplevel(self.input_window)
-        self.suggestion_popup.overrideredirect(True)
-        self.suggestion_popup.configure(bg=self.colors['border'])
-        self.suggestion_popup.attributes('-topmost', True)
-        
-        # Calculate popup position below the entry field
-        x = self.input_window.winfo_x() + 16
-        y = self.input_window.winfo_y() + 95  # Position below entry
-        width = self.input_window.winfo_width() - 32
-        
-        self.suggestion_popup.geometry(f"{width}x{min(len(suggestions) * 36 + 8, 200)}+{x}+{y}")
-        
-        # Inner frame with padding
-        inner_frame = tk.Frame(self.suggestion_popup, bg=self.colors['background'], padx=1, pady=1)
-        inner_frame.pack(fill='both', expand=True)
-        
-        # Create suggestion list with scrolling if needed
-        suggestion_frame = tk.Frame(inner_frame, bg=self.colors['background'])
-        suggestion_frame.pack(fill='both', expand=True)
-        
-        canvas = tk.Canvas(suggestion_frame, bg=self.colors['background'], 
-                          highlightthickness=0, height=min(len(suggestions) * 36, 190))
-        canvas.pack(side='left', fill='both', expand=True)
-        
-        scrollbar = ttk.Scrollbar(suggestion_frame, orient='vertical', command=canvas.yview)
-        if len(suggestions) > 5:
-            scrollbar.pack(side='right', fill='y')
-        
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        suggestion_container = tk.Frame(canvas, bg=self.colors['background'])
-        canvas.create_window((0, 0), window=suggestion_container, anchor='nw', width=width-4)
         
         # Add suggestion items
         for suggestion in suggestions:
-            item_frame = tk.Frame(suggestion_container, bg=self.colors['background'], 
-                                 padx=12, pady=8, height=36)
+            item_frame = tk.Frame(self.suggestion_container, bg=self.colors['background'], 
+                                padx=12, pady=8, height=36)
             item_frame.pack(fill='x')
-            item_frame.pack_propagate(False)  # Maintain consistent height
-            
+            item_frame.pack_propagate(False)
             label = tk.Label(item_frame, text=suggestion, font=self.fonts['body'],
                             bg=self.colors['background'], fg=self.colors['text'],
                             anchor='w')
             label.pack(fill='both')
-            
-            # Store reference to suggestion items for navigation
             self.suggestion_items.append((item_frame, label))
-            
-            # Hover effects
-            def on_enter(e, frame=item_frame, lbl=label):
+            def on_enter(_, frame=item_frame, lbl=label):
                 frame.configure(bg=self.colors['primary'])
                 lbl.configure(bg=self.colors['primary'])
-            
-            def on_leave(e, frame=item_frame, lbl=label):
-                if frame != self.suggestion_items[self.selected_suggestion_index][0]:
+            def on_leave(_, frame=item_frame, lbl=label):
+                if self.selected_suggestion_index == -1 or frame != self.suggestion_items[self.selected_suggestion_index][0]:
                     frame.configure(bg=self.colors['background'])
                     lbl.configure(bg=self.colors['background'])
-            
-            def on_click(e, word=suggestion):
+            def on_click(_, word=suggestion):
                 self.entry.delete(0, tk.END)
                 self.entry.insert(0, word)
                 self.entry.configure(fg=self.colors['text'])
@@ -612,7 +609,6 @@ class QuickDefinitionApp:
                     self.suggestion_popup.destroy()
                     self.suggestion_popup = None
                 self.entry.focus_set()
-            
             item_frame.bind('<Enter>', on_enter)
             item_frame.bind('<Leave>', on_leave)
             item_frame.bind('<Button-1>', on_click)
@@ -620,37 +616,17 @@ class QuickDefinitionApp:
             label.bind('<Leave>', on_leave)
             label.bind('<Button-1>', on_click)
         
-        # Update scrollregion after all items are added
-        suggestion_container.update_idletasks()
-        canvas.configure(scrollregion=canvas.bbox('all'))
+        # Update the popup dimensions after all items are added
+        self.suggestion_container.update_idletasks()
         
-        # Bind mousewheel scrolling
-        def on_mousewheel(event):
-            # Platform-specific mousewheel handling
-            if platform.system() == 'Darwin':  # macOS
-                canvas.yview_scroll(int(-1*(event.delta)), "units")
-            else:
-                canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-                
-        canvas.bind_all("<MouseWheel>", on_mousewheel)
-        # For Linux (some distributions)
-        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
-        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
+        # Recalculate the height based on the actual content
+        x = self.input_window.winfo_x() + 16
+        y = self.input_window.winfo_y() + 95  # Position below entry
+        width = self.input_window.winfo_width() - 32
+        actual_height = len(self.suggestion_items) * 36 + 8
         
-        # Remove mousewheel binding when popup is destroyed
-        def on_destroy(e):
-            try:
-                canvas.unbind_all("<MouseWheel>")
-                canvas.unbind_all("<Button-4>")
-                canvas.unbind_all("<Button-5>")
-            except:
-                pass
-            
-        self.suggestion_popup.bind("<Destroy>", on_destroy)
-        
-        # Let the popup handle escape to close itself
-        self.suggestion_popup.bind('<Escape>', lambda e: self.suggestion_popup.destroy())
-
+        self.suggestion_popup.geometry(f"{width}x{actual_height}+{x}+{y}")
+    
     def fetch_definition(self, event):
         """Start the definition fetching process"""
         word = self.entry.get().strip()
@@ -1011,14 +987,14 @@ class QuickDefinitionApp:
             search_btn.pack(side='right', padx=(0, 8))
             
             # Close button in top-right corner for quick exit
-            exit_btn = tk.Button(header_frame, text="×", 
+            exit_btn = tk.Button(header_frame, text="×", anchor="center",
                                 font=(self.fonts['heading'][0], 16),
                                 bg=self.colors['background'], fg=self.colors['muted'],
                                 activebackground=self.colors['error'],
                                 activeforeground=self.colors['text'],
-                                bd=0, width=2, height=1,
+                                bd=0,
                                 command=self.close_result_window)
-            exit_btn.place(relx=1.0, rely=0.0, anchor='ne')
+            exit_btn.place(relx=1.0, rely=0.0, anchor='ne', width=30, height=30)
             
             # Keyboard shortcuts
             self.result_window.bind('<Escape>', lambda e: self.close_result_window())
@@ -1118,7 +1094,7 @@ class QuickDefinitionApp:
 
 if __name__ == "__main__":
     app = QuickDefinitionApp()
-    print('Quick Definition App started! Press Ctrl+Alt+Space (or Cmd+Alt+Space on macOS) to activate.')
+    print('Quick Definition App started! Press Ctrl+Alt+D (or Cmd+Alt+D on macOS) to activate.')
     try:
         app.run()
     except Exception as e:
