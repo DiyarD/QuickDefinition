@@ -47,13 +47,13 @@ A lightweight, keyboard-driven dictionary application that provides instant word
    python app.py
    ```
 
-2. Press `Ctrl+Alt+Space` (Windows/Linux) or `Cmd+Alt+Space` (macOS) to bring up the input window.
+2. Press `Ctrl+Alt+D` (Windows/Linux) or `Cmd+Alt+D` (macOS) to bring up the input window.
 
 3. Type a word and press Enter to get its definition.
 
 ### Keyboard Shortcuts
 
-- `Ctrl+Alt+Space` / `Cmd+Alt+Space`: Show input window
+- `Ctrl+Alt+D` / `Cmd+Alt+D`: Show input window
 - `Esc`: Close current window
 - `Enter` (in input field): Search for definition
 - Arrow keys: Navigate suggestion list
