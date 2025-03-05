@@ -248,7 +248,7 @@ class QuickDefinitionApp:
         self.entry.bind("<FocusIn>", self.on_entry_focus_in)
         self.entry.bind("<FocusOut>", self.on_entry_focus_out)
         self.entry.bind('<Return>', self.on_return)
-        self.entry.bind('<Escape>', lambda e: self.hide_input_window())
+        self.entry.bind('<Escape>', lambda e: self.hide_input_window() or "break")
         self.entry.bind("<KeyRelease>", self.on_key_release)
         
         # Add arrow key navigation for suggestions
@@ -256,7 +256,7 @@ class QuickDefinitionApp:
         self.entry.bind("<Up>", self.navigate_suggestions_up)
         self.entry.bind("<Tab>", self.select_current_suggestion)
         
-        self.input_window.bind('<Escape>', lambda e: self.hide_input_window())
+        self.input_window.bind('<Escape>', lambda e: self.hide_input_window() or "break")
         
         # Get platform-specific shortcut name
         shortcut_text = "Ctrl+Alt+D"
@@ -401,6 +401,13 @@ class QuickDefinitionApp:
 
     def hide_all_windows(self):
         """Hide all app windows to ensure clean state"""
+        if self.suggestion_popup:
+            try:
+                self.suggestion_popup.destroy()
+                self.suggestion_popup = None
+            except tk.TclError:
+                pass
+            
         for window in [self.input_window, self.loading_window, 
                       self.result_window, self.error_window]:
             if window:
@@ -410,12 +417,6 @@ class QuickDefinitionApp:
                 except tk.TclError:
                     pass
         
-        if self.suggestion_popup:
-            try:
-                self.suggestion_popup.destroy()
-                self.suggestion_popup = None
-            except tk.TclError:
-                pass
 
     def hide_input_window(self):
         """Hide the input window"""
@@ -456,10 +457,7 @@ class QuickDefinitionApp:
         """Navigate down through suggestions with Down arrow key"""
         if self.suggestion_popup:
             if hasattr(self, 'suggestion_items') and self.suggestion_items:
-                self.selected_suggestion_index = min(
-                    self.selected_suggestion_index + 1,
-                    len(self.suggestion_items) - 1
-                )
+                self.selected_suggestion_index = (self.selected_suggestion_index + 1) % len(self.suggestion_items)
                 self.highlight_selected_suggestion()
             return "break"  # Prevent default behavior
         return None
@@ -468,10 +466,10 @@ class QuickDefinitionApp:
         """Navigate up through suggestions with Up arrow key"""
         if self.suggestion_popup:
             if hasattr(self, 'suggestion_items') and self.suggestion_items:
-                self.selected_suggestion_index = max(
-                    self.selected_suggestion_index - 1,
-                    -1  # -1 means no selection
-                )
+                if self.selected_suggestion_index <= 0:
+                    self.selected_suggestion_index = len(self.suggestion_items) - 1
+                else:
+                    self.selected_suggestion_index -= 1
                 self.highlight_selected_suggestion()
             return "break"  # Prevent default behavior
         return None
@@ -577,7 +575,7 @@ class QuickDefinitionApp:
             self.suggestion_container.pack(fill='both', expand=True)
             
             # Let the popup handle escape to close itself
-            self.suggestion_popup.bind('<Escape>', lambda event: self.suggestion_popup.destroy())
+            self.suggestion_popup.bind('<Escape>', lambda event: (self.suggestion_popup.destroy() or "break"))
         
         # Reset selection index
         self.selected_suggestion_index = -1
@@ -997,7 +995,7 @@ class QuickDefinitionApp:
             exit_btn.place(relx=1.0, rely=0.0, anchor='ne', width=30, height=30)
             
             # Keyboard shortcuts
-            self.result_window.bind('<Escape>', lambda e: self.close_result_window())
+            self.result_window.bind('<Escape>', lambda e: (self.close_result_window() or "break"))
             
             # Position and display window
             self.center_window(self.result_window, 550, 500)
@@ -1007,13 +1005,8 @@ class QuickDefinitionApp:
 
     def close_result_window(self):
         """Close the results window"""
-        if self.result_window:
-            try:
-                self.result_window.grab_release()
-                self.result_window.destroy()
-                self.result_window = None
-            except tk.TclError:
-                pass
+        self.hide_all_windows()
+
 
     def show_error(self, message):
         """Display an error message window"""
@@ -1073,7 +1066,7 @@ class QuickDefinitionApp:
         close_btn.pack(side='left')
         
         # Keyboard shortcuts
-        self.error_window.bind('<Escape>', lambda e: self.close_error_window())
+        self.error_window.bind('<Escape>', lambda e: (self.close_error_window() or "break"))
         self.error_window.bind('<Return>', lambda e: self.show_input())
         
         # Size and position
